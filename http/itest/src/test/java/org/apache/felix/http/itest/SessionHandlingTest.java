@@ -27,6 +27,7 @@ import static org.osgi.framework.Constants.SERVICE_RANKING;
 import static org.osgi.service.http.whiteboard.HttpWhiteboardConstants.HTTP_WHITEBOARD_CONTEXT_NAME;
 import static org.osgi.service.http.whiteboard.HttpWhiteboardConstants.HTTP_WHITEBOARD_CONTEXT_PATH;
 import static org.osgi.service.http.whiteboard.HttpWhiteboardConstants.HTTP_WHITEBOARD_CONTEXT_SELECT;
+import static org.osgi.service.http.whiteboard.HttpWhiteboardConstants.HTTP_WHITEBOARD_LISTENER;
 import static org.osgi.service.http.whiteboard.HttpWhiteboardConstants.HTTP_WHITEBOARD_SERVLET_NAME;
 import static org.osgi.service.http.whiteboard.HttpWhiteboardConstants.HTTP_WHITEBOARD_SERVLET_PATTERN;
 
@@ -34,9 +35,11 @@ import java.io.IOException;
 import java.io.PrintWriter;
 import java.io.StringReader;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Dictionary;
 import java.util.Hashtable;
 import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
@@ -45,6 +48,8 @@ import javax.servlet.Servlet;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import javax.servlet.http.HttpSession;
+import javax.servlet.http.HttpSessionEvent;
+import javax.servlet.http.HttpSessionListener;
 
 import org.apache.http.HttpEntity;
 import org.apache.http.client.config.CookieSpecs;
@@ -176,6 +181,7 @@ public class SessionHandlingTest extends BaseIntegrationTest
         }
 
     }
+    
     @Test
     public void testSessionAttributes() throws Exception
     {
@@ -246,5 +252,132 @@ public class SessionHandlingTest extends BaseIntegrationTest
         assertTrue(json.getBoolean("session"));
         assertEquals("test2", json.getString("value"));
         assertEquals(sessionId2, json.getString("sessionId"));
+    }
+    
+    static class TestListener implements HttpSessionListener {
+	
+		List<HttpSession> sessions = new CopyOnWriteArrayList<HttpSession>();
+		
+		@Override
+		public void sessionCreated(HttpSessionEvent e) {
+			sessions.add(e.getSession());
+		}
+	
+		@Override
+		public void sessionDestroyed(HttpSessionEvent e) {
+			sessions.remove(e.getSession());
+		}
+		
+		public List<Object> getSessionAttribute(String key) {
+			List<Object> values = new ArrayList<Object>();
+			for(HttpSession session : sessions) {
+				values.add(session.getAttribute(key));
+			}
+			return values;
+		}
+	}
+
+	private TestListener setupListener(final String context) throws Exception
+    {
+        Dictionary<String, Object> listenerProps = new Hashtable<String, Object>();
+        listenerProps.put(HTTP_WHITEBOARD_LISTENER, Boolean.TRUE.toString());
+        if (context != null)
+        {
+            listenerProps.put(HTTP_WHITEBOARD_CONTEXT_SELECT, "(" + HTTP_WHITEBOARD_CONTEXT_NAME + "=" + context + ")");
+        }
+
+        TestListener listener = new TestListener();
+        registrations.add(m_context.registerService(HttpSessionListener.class.getName(), listener, listenerProps));
+        
+        return listener;
+    }
+
+    @Test
+    public void testSessionListner() throws Exception
+    {
+    	setupContext("test1", "/");
+    	setupContext("test2", "/");
+    	
+    	TestListener listener1 = setupListener("test1");
+    	TestListener listener2 = setupListener("test2");
+    	
+    	setupLatches(2);
+    	
+    	setupServlet("foo", new String[] { "/foo" }, 1, "test1");
+    	setupServlet("bar", new String[] { "/bar" }, 2, "test2" );
+    	
+    	assertTrue(initLatch.await(5, TimeUnit.SECONDS));
+    	
+    	RequestConfig globalConfig = RequestConfig.custom()
+    			.setCookieSpec(CookieSpecs.BEST_MATCH)
+    			.build();
+    	final CloseableHttpClient httpclient = HttpClients.custom().setDefaultRequestConfig(globalConfig)
+    			.setDefaultCookieStore(new BasicCookieStore())
+    			.build();
+    	
+    	JsonObject json;
+    	
+    	// session should not be available
+    	// check for foo servlet and listener1
+    	json = getJSONResponse(httpclient, "/foo");
+    	assertFalse(json.getBoolean("session"));
+    	assertTrue(listener1.getSessionAttribute("value").isEmpty());
+    	
+    	// check for bar servlet
+    	json = getJSONResponse(httpclient, "/bar");
+    	assertFalse(json.getBoolean("session"));
+    	assertTrue(listener2.getSessionAttribute("value").isEmpty());
+    	
+    	// create session for  context of servlet foo
+    	// check session and session attribute
+    	json = getJSONResponse(httpclient, "/foo?create=true");
+    	assertTrue(json.getBoolean("session"));
+    	assertEquals("test1", json.getString("value"));
+    	final String sessionId1 = json.getString("sessionId");
+    	assertNotNull(sessionId1);
+    	assertEquals(Collections.singletonList("test1"),
+    			listener1.getSessionAttribute("value"));
+    	
+    	// check session for servlet bar (= no session)
+    	json = getJSONResponse(httpclient, "/bar");
+    	assertFalse(json.getBoolean("session"));
+    	assertTrue(listener2.getSessionAttribute("value").isEmpty());
+    	// another request to servlet foo, still the same
+    	json = getJSONResponse(httpclient, "/foo");
+    	assertTrue(json.getBoolean("session"));
+    	assertEquals("test1", json.getString("value"));
+    	assertEquals(sessionId1, json.getString("sessionId"));
+    	assertEquals(Collections.singletonList("test1"),
+    			listener1.getSessionAttribute("value"));
+    	
+    	// create session for second context
+    	json = getJSONResponse(httpclient, "/bar?create=true");
+    	assertTrue(json.getBoolean("session"));
+    	assertEquals("test2", json.getString("value"));
+    	final String sessionId2 = json.getString("sessionId");
+    	assertNotNull(sessionId2);
+    	assertFalse(sessionId1.equals(sessionId2));
+    	assertEquals(Collections.singletonList("test2"),
+    			listener2.getSessionAttribute("value"));
+    	
+    	// and context foo is untouched
+    	json = getJSONResponse(httpclient, "/foo");
+    	assertTrue(json.getBoolean("session"));
+    	assertEquals("test1", json.getString("value"));
+    	assertEquals(sessionId1, json.getString("sessionId"));
+    	assertEquals(Collections.singletonList("test1"),
+    			listener1.getSessionAttribute("value"));
+    	
+    	// invalidate session for foo context
+    	json = getJSONResponse(httpclient, "/foo?destroy=true");
+    	assertFalse(json.getBoolean("session"));
+    	assertTrue(listener1.getSessionAttribute("value").isEmpty());
+    	// bar should be untouched
+    	json = getJSONResponse(httpclient, "/bar");
+    	assertTrue(json.getBoolean("session"));
+    	assertEquals("test2", json.getString("value"));
+    	assertEquals(sessionId2, json.getString("sessionId"));
+    	assertEquals(Collections.singletonList("test2"),
+    			listener2.getSessionAttribute("value"));
     }
 }
