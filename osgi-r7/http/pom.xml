@@ -43,7 +43,6 @@
     </prerequisites>
 
     <modules>
-        <module>api</module>
         <module>base</module>
         <module>bridge</module>
         <module>jetty</module>
