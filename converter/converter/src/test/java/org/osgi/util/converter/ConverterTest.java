@@ -791,6 +791,20 @@ public class ConverterTest {
             }
         }
     }
+
+    @Test
+    public void testMapToDTOWithGenericVariables() {
+    	    	Map<String, Object> dto = new HashMap<>();
+    	    	dto.put("set", new HashSet<>(Arrays.asList("foo", (int) 'o', 'o')));
+    	    	dto.put("raw", "1234");
+    	    	dto.put("array", Arrays.asList("foo", (int) 'o', 'o'));
+    	    	
+    	    	MyGenericDTOWithVariables<Character> converted = 
+    	    			converter.convert(dto).to(new TypeReference<MyGenericDTOWithVariables<Character>>() {});
+    	    	assertEquals(Character.valueOf('1'), converted.raw);
+    	    	assertArrayEquals(new Character[] {'f', 'o', 'o'}, converted.array);
+    	    	assertEquals(new HashSet<Character>(Arrays.asList('f', 'o')), converted.set);
+    }
     
     @Test
     public void testMapToDTOWithSurplusMapFiels() {
@@ -1185,6 +1199,20 @@ public class ConverterTest {
 
         MyGenericInterface converted = converter.convert(dto).to(MyGenericInterface.class);
         assertEquals(new HashSet<Character>(Arrays.asList('f', 'o')), converted.charSet());
+    }
+
+    @Test
+    public void testMapToInterfaceWithGenericVariables() {
+	    	Map<String, Object> dto = new HashMap<>();
+	    	dto.put("set", new HashSet<>(Arrays.asList("foo", (int) 'o', 'o')));
+	    	dto.put("raw", "1234");
+	    	dto.put("array", Arrays.asList("foo", (int) 'o', 'o'));
+	    	
+	    	MyGenericInterfaceWithVariables<Character> converted = 
+	    			converter.convert(dto).to(new TypeReference<MyGenericInterfaceWithVariables<Character>>() {});
+	    	assertEquals(Character.valueOf('1'), converted.raw());
+	    	assertArrayEquals(new Character[] {'f', 'o', 'o'}, converted.array());
+	    	assertEquals(new HashSet<Character>(Arrays.asList('f', 'o')), converted.set());
     }
 
     static class MyClass2 {
