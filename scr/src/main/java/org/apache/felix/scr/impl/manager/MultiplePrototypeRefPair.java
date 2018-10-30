@@ -50,7 +50,7 @@ public class MultiplePrototypeRefPair<S, T> extends RefPair<S, T>
     @Override
     public boolean setServiceObject(ComponentContextImpl<S> key, T serviceObject)
     {
-        return instances.putIfAbsent(key, serviceObject) == null;
+        return instances.putIfAbsent( key, serviceObject ) == null;
     }
 
     @Override
@@ -58,23 +58,20 @@ public class MultiplePrototypeRefPair<S, T> extends RefPair<S, T>
     {
     	if ( key == null )
     	{
-			try 
+			final Iterator<Entry<ComponentContextImpl<S>, T>> iter = instances.entrySet().iterator();
+			while ( iter.hasNext() ) 
 			{
-				final Iterator<Entry<ComponentContextImpl<S>, T>> iter = instances.entrySet().iterator();
-				while ( iter.hasNext() ) 
-				{
-					Entry<ComponentContextImpl<S>, T> e = iter.next();
-					doUngetService(e.getKey(), e.getValue());
-    			} 
-    		}
-    		catch (final IllegalStateException ise)
-    		{
-    			// ignore
-   			}
+				Entry<ComponentContextImpl<S>, T> e = iter.next();
+				doUngetService( e.getKey(), e.getValue() );
+   			} 
     		instances.clear();
     		return null ;
     	}
-        return instances.remove(key);
+        T service = instances.remove( key );
+        if(service != null) {
+        	doUngetService( key, service );
+        }
+		return service;
     }
 
     @Override
@@ -106,9 +103,9 @@ public class MultiplePrototypeRefPair<S, T> extends RefPair<S, T>
 	private void doUngetService(ComponentContextImpl<S> key, final T service) {
 		try 
 		{
-			key.getComponentServiceObjectsHelper().getServiceObjects(getRef()).ungetService(service);
+			key.getComponentServiceObjectsHelper().getServiceObjects(getRef()).ungetService( service );
 		}
-		catch (final IllegalStateException ise)
+		catch ( final IllegalStateException ise )
 		{
 			// ignore
 		}

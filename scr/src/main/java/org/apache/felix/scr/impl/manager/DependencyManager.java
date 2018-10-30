@@ -1681,7 +1681,9 @@ public class DependencyManager<S, T> implements ReferenceManager<S, T>
             {
                 invokeUnbindMethod(componentContext, boundRef, trackingCount.get(), edgeInfo);
             }
-
+            
+            boundRef.unsetServiceObject(componentContext);
+            
         }
         latch.countDown();
     }
